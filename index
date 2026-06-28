@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ WORD RUNNERS : 말씀 마라톤</title>
+    <!-- Tailwind CSS 4.0 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Suit:wght@500;700;900&display=swap');
+        
+        body { font-family: 'Suit', sans-serif; }
+        .font-game { font-family: 'Orbitron', sans-serif; }
+        
+        /* 네온 이펙트 */
+        .neon-glow-green { text-shadow: 0 0 10px #22C55E, 0 0 20px #22C55E; }
+        .neon-glow-pink { text-shadow: 0 0 10px #EC4899, 0 0 20px #EC4899; }
+        .neon-border { box-shadow: 0 0 15px rgba(34, 197, 94, 0.2); }
+        
+        /* 노래방 스타일 하이라이트 */
+        .word-active { color: #22C55E; text-shadow: 0 0 8px #22C55E; font-weight: 900; transform: scale(1.05); display: inline-block; transition: all 0.2s; }
+    </style>
+</head>
+<body class="bg-[#0B0F19] text-slate-100 min-h-screen flex flex-col justify-between p-4 antialiased">
+
+    <!-- 상단 게임 스탯 바 -->
+    <header class="bg-[#161F38] border border-slate-800 rounded-3xl p-4 mb-4 w-full max-w-md mx-auto shadow-2xl">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-center gap-2">
+                <span class="font-game text-xs font-black tracking-widest text-[#EC4899] uppercase">LV.1 START LINE</span>
+            </div>
+            <!-- 스트릭 불꽃 & 쉴드 상점 -->
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1 bg-slate-900/60 px-2.5 py-1 rounded-full border border-orange-500/30">
+                    <span class="text-base animate-pulse">🔥</span>
+                    <span id="streak-count" class="font-game text-xs font-black text-orange-400">7 COMBO</span>
+                </div>
+                <div id="shield-item" class="flex items-center gap-1 bg-slate-900/60 px-2.5 py-1 rounded-full border border-blue-500/30 opacity-100">
+                    <span class="text-base">🛡️</span>
+                    <span class="font-game text-xs font-black text-blue-400">1</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 사이버 펑크 마라톤 트랙 -->
+        <div class="relative w-full h-7 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 p-[2px]">
+            <!-- 러너 캐릭터 (도트 감성 이모지) -->
+            <div id="runner-char" class="absolute top-1/2 -translate-y-1/2 left-2 text-lg transition-all duration-300 ease-out z-10 filter drop-shadow-[0_0_8px_#22C55E]">🏃‍♂️</div>
+            <!-- 네온 게이지 라인 -->
+            <div id="race-progress" class="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 w-0 rounded-2xl shadow-[0_0_10px_#10B981] transition-all duration-300 ease-out"></div>
+        </div>
+        <div class="flex justify-between items-center mt-1.5 px-1">
+            <span id="day-indicator" class="font-game text-[10px] text-slate-400 font-bold tracking-wider">DAY 01 / 90</span>
+            <span class="text-[10px] text-slate-500 font-medium">새번역 성경 모드</span>
+        </div>
+    </header>
+
+    <!-- 메인 스테이지 (카드) -->
+    <main class="flex-1 flex flex-col justify-center max-w-md mx-auto w-full gap-4">
+        
+        <!-- 말씀 대형 전광판 -->
+        <div class="bg-[#111827] border-2 border-slate-800 rounded-3xl p-6 shadow-2xl text-center relative overflow-hidden neon-border">
+            <!-- 백그라운드 그리드 데코 -->
+            <div class="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:24px_24px] opacity-10"></div>
+            
+            <span id="scripture-ref" class="relative z-10 inline-block bg-slate-900 text-cyan-400 font-game text-[11px] font-black tracking-widest px-3 py-1 rounded-md border border-cyan-500/20 uppercase mb-4">MARK 1:1</span>
+            
+            <!-- 오늘의 말씀 (글자 단위 파싱 공간) -->
+            <div id="target-text" class="relative z-10 text-xl font-bold text-slate-300 leading-relaxed break-keep tracking-wide transition-all">
+                하나님의 아들 예수 그리스도의 복음의 시작은 이러하다.
+            </div>
+        </div>
+
+        <!-- 실시간 보이스 트래커 -->
+        <div class="bg-slate-950 border border-slate-850 p-4 rounded-2xl shadow-inner min-h-[100px] flex flex-col justify-between">
+            <div class="flex justify-between items-center border-b border-slate-900 pb-1.5">
+                <span class="text-[9px] text-emerald-400 font-game font-black tracking-widest uppercase animate-pulse">● AI VOICE TRACKING</span>
+                <div id="match-status" class="font-game text-xs font-black text-amber-400">MATCH: 0%</div>
+            </div>
+            <p id="recognized-text" class="text-sm text-slate-500 mt-2 italic font-medium">"[RUN START] 버튼을 탭하고 랩을 하듯 읽으세요!"</p>
+        </div>
+
+    </main>
+
+    <!-- 하단 사이버 컨트롤러 -->
+    <footer class="max-w-md mx-auto w-full mt-4 bg-[#161F38] border border-slate-800 p-4 rounded-3xl shadow-2xl flex justify-between items-center gap-4">
+        <button id="btn-record" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-game font-black tracking-widest py-4 px-6 rounded-2xl transition-all shadow-lg shadow-blue-900/40 active:scale-95 text-center text-sm cursor-pointer">
+            ⚡ RUN START
+        </button>
+        <button id="btn-next" class="hidden flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-game font-black tracking-widest py-4 px-6 rounded-2xl transition-all shadow-lg shadow-emerald-900/40 text-center text-sm cursor-pointer animate-bounce">
+            NEXT STAGE 🚀
+        </button>
+    </footer>
+
+    <!-- 시스템 로직 -->
+    <script>
+        const courseData = [
+            { day: 1, ref: "MARK 1:1", text: "하나님의 아들 예수 그리스도의 복음의 시작은 이러하다." },
+            { day: 2, ref: "MARK 1:15", text: "때가 찼다. 하나님의 나라가 가까이 왔으니, 회개하고 복음을 믿어라." },
+            { day: 3, ref: "GENESIS 1:1", text: "태초에 하나님이 천지를 창조하셨다." }
+        ];
+
+        let currentCourseIndex = 0;
+        let isRecording = false;
+        let recognition = null;
+
+        const btnRecord = document.getElementById('btn-record');
+        const btnNext = document.getElementById('btn-next');
+        const recognizedTextEl = document.getElementById('recognized-text');
+        const matchStatusEl = document.getElementById('match-status');
+        const runnerChar = document.getElementById('runner-char');
+        const raceProgress = document.getElementById('race-progress');
+        const targetTextEl = document.getElementById('target-text');
+
+        // 음성 인식 셋업
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ko-KR';
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onresult = (event) => {
+                let currentTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    currentTranscript += event.results[i][0].transcript;
+                }
+
+                recognizedTextEl.innerText = currentTranscript;
+                recognizedTextEl.className = "text-sm text-slate-200 mt-2 font-medium";
+
+                // 일치율 판정
+                const targetText = courseData[currentCourseIndex].text.replace(/\s+/g, '');
+                const cleanTranscript = currentTranscript.replace(/\s+/g, '');
+                const matchRate = calculateMatchRate(targetText, cleanTranscript);
+                
+                // 실시간 캐릭터 레이싱 애니메이션
+                const visualProgress = Math.min(matchRate, 92);
+                raceProgress.style.width = `${visualProgress}%`;
+                runnerChar.style.left = `calc(${visualProgress}% - 6px)`;
+
+                matchStatusEl.innerText = `MATCH: ${matchRate}%`;
+
+                // 70% 돌파 시 스테이지 클리어
+                if (matchRate >= 70) {
+                    stageClear();
+                }
+            };
+
+            recognition.onend = () => { if (isRecording) recognition.start(); };
+        }
+
+        btnRecord.addEventListener('click', () => {
+            if (!recognition) return;
+            if (!isRecording) {
+                isRecording = true;
+                recognition.start();
+                btnRecord.innerText = "🛑 RECORDING...";
+                btnRecord.className = "flex-1 bg-gradient-to-r from-pink-600 to-red-600 text-white font-game font-black tracking-widest py-4 px-6 rounded-2xl transition-all shadow-lg text-sm cursor-pointer";
+                recognizedTextEl.innerText = "Listening... 말씀 보드를 보고 소리 내어 질주하세요!";
+            } else {
+                stopRecording();
+            }
+        });
+
+        function stopRecording() {
+            isRecording = false;
+            if (recognition) recognition.stop();
+            btnRecord.innerText = "⚡ RUN START";
+            btnRecord.className = "flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-game font-black tracking-widest py-4 px-6 rounded-2xl transition-all shadow-lg text-sm cursor-pointer";
+        }
+
+        // 스테이지 클리어 연출
+        function stageClear() {
+            stopRecording();
+            btnRecord.classList.add('hidden');
+            btnNext.classList.remove('hidden');
+            
+            raceProgress.style.width = '100%';
+            runnerChar.style.left = 'calc(100% - 22px)';
+            runnerChar.innerText = '👑'; // 골인 시 왕관으로 변경
+            
+            matchStatusEl.innerHTML = "STAGE CLEAR!!";
+            matchStatusEl.className = "font-game text-xs font-black text-emerald-400 neon-glow-green animate-pulse";
+            
+            // 텍스트 전체 초록 네온 이펙트
+            targetTextEl.className = "relative z-10 text-xl font-black text-emerald-400 neon-glow-green leading-relaxed break-keep tracking-wide";
+        }
+
+        // 다음 스테이지 전환
+        btnNext.addEventListener('click', () => {
+            currentCourseIndex++;
+            if (currentCourseIndex >= courseData.length) {
+                alert("🎮 LEVEL 1 완료! 당신은 진정한 워드 러너입니다.");
+                currentCourseIndex = 0;
+            }
+            
+            const nextData = courseData[currentCourseIndex];
+            document.getElementById('day-indicator').innerText = `DAY 0${nextData.day} / 90`;
+            document.getElementById('scripture-ref').innerText = nextData.ref;
+            
+            targetTextEl.innerText = nextData.text;
+            targetTextEl.className = "relative z-10 text-xl font-bold text-slate-300 leading-relaxed break-keep tracking-wide transition-all";
+            
+            recognizedTextEl.innerText = `"[RUN START] 버튼을 탭하고 랩을 하듯 읽으세요!"`;
+            recognizedTextEl.className = "text-sm text-slate-500 mt-2 italic font-medium";
+            
+            matchStatusEl.innerText = "MATCH: 0%";
+            matchStatusEl.className = "font-game text-xs font-black text-amber-400";
+            
+            raceProgress.style.width = '0%';
+            runnerChar.style.left = '8px';
+            runnerChar.innerText = '🏃‍♂️';
+
+            btnNext.classList.add('hidden');
+            btnRecord.classList.remove('hidden');
+        });
+
+        function calculateMatchRate(target, input) {
+            let matches = 0;
+            for (let char of input) {
+                if (target.includes(char)) matches++;
+            }
+            if (input.length === 0) return 0;
+            let rate = Math.round((matches / target.length) * 100);
+            return rate > 100 ? 100 : rate;
+        }
+    </script>
+</body>
+</html>
