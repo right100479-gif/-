@@ -11,6 +11,7 @@ public class EntryPoint
     private const string PresetName = "찬양가사";
     private const string TrackName = "찬양자막_Auto5";
     private const double FadeSeconds = 0.25;
+    private const double MinLastLyricHoldSeconds = 3.0;
     private const double MaxLastLyricHoldSeconds = 8.0;
     private const double EndMarginSeconds = 0.20;
 
@@ -51,19 +52,27 @@ public class EntryPoint
                 return;
 
             double projectContentEnd = GetProjectContentEndSeconds(vegas);
+            double lastOriginalEnd = 0.0;
+            double lastAdjustedEnd = 0.0;
 
-            // 마지막 가사는 마지막 음절에서 바로 사라지지 않도록
-            // 원본 영상/오디오 끝의 여운까지 유지한다.
-            // 단, 긴 무가사 아웃트로에서 지나치게 오래 남지 않도록 최대 8초로 제한한다.
+            // 마지막 가사는 CTC가 잡은 마지막 음절 종료점에서 바로 끊지 않는다.
+            // 프로젝트 끝 계산이 실패하더라도 최소 3초는 반드시 더 유지한다.
+            // 실제 영상/오디오가 더 길면 그 끝까지(최대 +8초) 연장한다.
             if (rows.Count > 0)
             {
                 SubtitleRow last = rows[rows.Count - 1];
-                double desiredEnd = Math.Min(
-                    Math.Max(last.End, projectContentEnd - EndMarginSeconds),
-                    last.End + MaxLastLyricHoldSeconds
-                );
-                if (desiredEnd > last.End)
-                    last.End = desiredEnd;
+                lastOriginalEnd = last.End;
+
+                double minimumEnd = last.End + MinLastLyricHoldSeconds;
+                double mediaTailEnd = projectContentEnd > last.End
+                    ? projectContentEnd - EndMarginSeconds
+                    : minimumEnd;
+
+                double desiredEnd = Math.Max(minimumEnd, mediaTailEnd);
+                desiredEnd = Math.Min(desiredEnd, last.End + MaxLastLyricHoldSeconds);
+
+                last.End = desiredEnd;
+                lastAdjustedEnd = desiredEnd;
             }
 
             VideoTrack track = FindOrCreateSubtitleTrack(vegas);
@@ -113,7 +122,13 @@ public class EntryPoint
                 "시간은 SYNC_REPORT.csv의 초 단위 값을 직접 사용했습니다.\n" +
                 "VEGAS Ruler/24fps/30fps 형식 변환을 거치지 않습니다.\n\n" +
                 "트랙: " + TrackName + "\n" +
-                "Preset: " + PresetName,
+                "Preset: " + PresetName + "\n" +
+                (rows.Count > 0
+                    ? "마지막 자막: " +
+                      lastOriginalEnd.ToString("0.00", CultureInfo.InvariantCulture) +
+                      "초 → " +
+                      lastAdjustedEnd.ToString("0.00", CultureInfo.InvariantCulture) + "초"
+                    : ""),
                 "Worship Lyrics Auto 5.0",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information
