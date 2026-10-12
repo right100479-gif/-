@@ -13,47 +13,89 @@ set "APPDIR=%LOCALAPPDATA%\WorshipLyricsAuto4"
 set "VENV=%APPDIR%\.venv"
 if not exist "%APPDIR%" mkdir "%APPDIR%"
 
-set "PYEXE="
-where py >nul 2>&1
-if not errorlevel 1 set "PYEXE=py -3.11"
-if not defined PYEXE if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set "PYEXE=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+echo [0/5] Python 3.11 check...
+set "PYCMD="
 
-if not defined PYEXE (
+rem Prefer a real Python 3.11 executable. Do NOT trust the py launcher
+rem unless it can actually start Python 3.11.
+if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
+  set PYCMD="%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+)
+
+if not defined PYCMD if exist "%ProgramFiles%\Python311\python.exe" (
+  set PYCMD="%ProgramFiles%\Python311\python.exe"
+)
+
+if not defined PYCMD (
+  py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info[:2]==(3,11) else 1)" >nul 2>&1
+  if not errorlevel 1 set "PYCMD=py -3.11"
+)
+
+if not defined PYCMD (
+  echo Python 3.11 runtime was not found.
   where winget >nul 2>&1
   if errorlevel 1 goto :nopython
-  echo Installing Python 3.11...
+
+  echo Installing Python 3.11 with winget...
   winget install -e --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
+  if errorlevel 1 goto :nopython
+
+  rem The current terminal may not receive the new PATH immediately,
+  rem so check the known installation paths directly.
   if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
-    set "PYEXE=%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
-  ) else (
-    echo Python installation finished. Run INSTALL_V4.bat again.
+    set PYCMD="%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+  )
+
+  if not defined PYCMD if exist "%ProgramFiles%\Python311\python.exe" (
+    set PYCMD="%ProgramFiles%\Python311\python.exe"
+  )
+
+  if not defined PYCMD (
+    py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info[:2]==(3,11) else 1)" >nul 2>&1
+    if not errorlevel 1 set "PYCMD=py -3.11"
+  )
+
+  if not defined PYCMD (
+    echo.
+    echo Python 3.11 was installed, but this window cannot see it yet.
+    echo Close this window and run INSTALL_V4.bat one more time.
     pause
     exit /b 0
   )
 )
+
+echo Python command: %PYCMD%
+%PYCMD% --version
+if errorlevel 1 goto :nopython
 
 echo [1/5] FFmpeg check...
 where ffmpeg >nul 2>&1
 if errorlevel 1 (
   where winget >nul 2>&1
   if errorlevel 1 goto :noffmpeg
+  echo Installing FFmpeg...
   winget install -e --id Gyan.FFmpeg --accept-package-agreements --accept-source-agreements
+  if errorlevel 1 goto :noffmpeg
 )
 
 echo [2/5] Python environment...
 if not exist "%VENV%\Scripts\python.exe" (
-  %PYEXE% -m venv "%VENV%"
+  %PYCMD% -m venv "%VENV%"
   if errorlevel 1 goto :fail
 )
+
+if not exist "%VENV%\Scripts\python.exe" goto :fail
 
 echo [3/5] AI packages...
 "%VENV%\Scripts\python.exe" -m pip install --upgrade pip
 if errorlevel 1 goto :fail
+
 "%VENV%\Scripts\python.exe" -m pip install whisperx demucs tkinterdnd2
 if errorlevel 1 goto :fail
 
 echo [4/5] App files...
 copy /Y "WorshipLyricsAuto4.pyw" "%APPDIR%\WorshipLyricsAuto4.pyw" >nul
+if errorlevel 1 goto :fail
 
 echo [5/5] VEGAS fade helper...
 for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')"`) do set "DOCS=%%D"
@@ -78,14 +120,21 @@ pause
 exit /b 0
 
 :nopython
-echo ERROR: Python 3.11 is not installed and winget is unavailable.
+echo.
+echo ERROR: A working Python 3.11 runtime could not be found or installed.
+echo If Microsoft Store opened, close it and run this installer again.
 pause
 exit /b 1
+
 :noffmpeg
-echo ERROR: FFmpeg is required and winget is unavailable.
+echo.
+echo ERROR: FFmpeg is required and could not be installed automatically.
 pause
 exit /b 1
+
 :fail
+echo.
 echo INSTALL FAILED.
+echo Please send a screenshot of this window.
 pause
 exit /b 1
