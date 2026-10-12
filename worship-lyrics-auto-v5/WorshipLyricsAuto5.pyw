@@ -489,24 +489,58 @@ def get_media_duration_seconds(source):
         pass
     return 0.0
 
-def extend_final_lyric_to_tail(source,rows):
+def extend_all_lyric_tails(source,rows):
     if not rows:
-        return None
-    last=rows[-1]
-    original=float(last["end"])
-    duration=get_media_duration_seconds(source)
-    if duration<=original:
-        return (original,original,duration)
+        return {"adjusted":0,"last_original":0.0,"last_adjusted":0.0,"duration":0.0}
 
-    # 마지막 음절에서 즉시 사라지지 않고 실제 곡의 여운까지 남긴다.
-    # 아주 긴 무가사 아웃트로는 최대 8초까지만 유지한다.
-    target=min(max(original,duration-0.20),original+8.0)
-    if target>original:
-        last["end"]=target
-    return (original,float(last["end"]),duration)
+    adjusted=0
+
+    # CTC의 end는 "마지막 음소가 끝난 지점"에 가깝다.
+    # 자막 표시는 그 지점에서 바로 끊지 않고 다음 가사 시작 전까지 여운을 준다.
+    # 짧은 가사 간격: 다음 줄 0.10초 전까지 유지
+    # 긴 무가사 간격/간주: 최대 1.20초만 추가 유지
+    for i in range(len(rows)-1):
+        cur=rows[i]
+        nxt=rows[i+1]
+        original=float(cur["end"])
+        gap=float(nxt["start"])-original
+
+        if gap <= 0.10:
+            continue
+
+        if gap <= 2.20:
+            desired=float(nxt["start"])-0.10
+        else:
+            desired=original+1.20
+
+        # 최소 0.35초의 여운을 주되 다음 가사를 침범하지 않는다.
+        desired=max(desired, min(original+0.35, float(nxt["start"])-0.05))
+        desired=min(desired, float(nxt["start"])-0.05)
+
+        if desired>original:
+            cur["end"]=desired
+            adjusted+=1
+
+    # 마지막 가사는 실제 곡 끝의 여운까지 유지한다.
+    last=rows[-1]
+    last_original=float(last["end"])
+    duration=get_media_duration_seconds(source)
+
+    if duration>last_original:
+        target=min(max(last_original+1.50,duration-0.20),last_original+8.0)
+        if target>last_original:
+            last["end"]=target
+            adjusted+=1
+
+    return {
+        "adjusted":adjusted,
+        "last_original":last_original,
+        "last_adjusted":float(last["end"]),
+        "duration":duration
+    }
 
 def write_outputs(source,rows,out_dir):
-    tail_info=extend_final_lyric_to_tail(source,rows)
+    tail_info=extend_all_lyric_tails(source,rows)
     out=Path(out_dir); out.mkdir(parents=True,exist_ok=True); base=Path(source).stem
     srt=out/(base+"_SRT.srt")
     rep=out/(base+"_SYNC_REPORT.csv")
@@ -664,8 +698,9 @@ class App(TkinterDnD.Tk):
                     self.logmsg("싱크 리포트: "+str(p["report"]))
                     self.logmsg("MMS 정렬 JSON: "+str(p["json"]))
                     if p.get("tail_info"):
-                        a,b,d=p["tail_info"]
-                        self.logmsg("마지막 가사 여운: %.2f초 → %.2f초 (곡 끝 %.2f초)"%(a,b,d))
+                        ti=p["tail_info"]
+                        self.logmsg("가사 여운 보정: %d줄"%ti["adjusted"])
+                        self.logmsg("마지막 가사: %.2f초 → %.2f초 (곡 끝 %.2f초)"%(ti["last_original"],ti["last_adjusted"],ti["duration"]))
                     messagebox.showinfo(APP_NAME,"5.0 MMS 자동 싱크가 끝났습니다.\n\n곡마다 마커를 찍지 않습니다.\n먼저 앞/중간/뒤 3곳만 재생해서 싱크를 확인해 주세요.\n\n30p 프로젝트는 *_VEGAS_TimeFrames_30fps.txt를 사용하세요.")
                 elif kind=="error":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("오류:"); self.logmsg(p); messagebox.showerror(APP_NAME,p.split("\n\n")[0])
