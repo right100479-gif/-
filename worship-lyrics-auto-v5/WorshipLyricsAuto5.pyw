@@ -14,7 +14,13 @@ CACHE_DIR=APP_DIR/"cache"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SETTINGS_FILE=DATA_DIR/"settings.json"
-HF_DIR=CACHE_DIR/"huggingface"\nTORCH_DIR=CACHE_DIR/"torch"\nHF_DIR.mkdir(parents=True, exist_ok=True)\nTORCH_DIR.mkdir(parents=True, exist_ok=True)\nos.environ.setdefault("HF_HOME",str(HF_DIR))\nos.environ.setdefault("TORCH_HOME",str(TORCH_DIR))\nos.environ.setdefault("TOKENIZERS_PARALLELISM","false")
+HF_DIR=CACHE_DIR/"huggingface"
+TORCH_DIR=CACHE_DIR/"torch"
+HF_DIR.mkdir(parents=True, exist_ok=True)
+TORCH_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME",str(HF_DIR))
+os.environ.setdefault("TORCH_HOME",str(TORCH_DIR))
+os.environ.setdefault("TOKENIZERS_PARALLELISM","false")
 _CONSOLE_LOG=None
 
 def ensure_console_streams():
@@ -119,7 +125,7 @@ def align_lines_mms(vocals_path,sections,device,log_cb=None):
     text_starred=[]
     valid=[]
     for row,roman in zip(lyric_rows,romanized):
-        roman=re.sub(r"\\s+"," ",roman).strip()
+        roman=re.sub(r"\s+"," ",roman).strip()
         if not roman:
             continue
         tokens_starred.extend(["<star>",roman])
@@ -330,14 +336,14 @@ def write_outputs(source,rows,out_dir):
 
     blocks=[]
     for i,r in enumerate(rows,1):
-        blocks.append("%d\\r\\n%s --> %s\\r\\n%s\\r\\n"%(i,srt_time(r["start"]),srt_time(r["end"]),r["text"]))
-    srt.write_text("\\r\\n".join(blocks),encoding="utf-8-sig")
+        blocks.append("%d\r\n%s --> %s\r\n%s\r\n"%(i,srt_time(r["start"]),srt_time(r["end"]),r["text"]))
+    srt.write_text("\r\n".join(blocks),encoding="utf-8-sig")
 
     for path,fps in ((t24,24),(t30,30)):
         with path.open("w",encoding="utf-8-sig",newline="") as f:
             for r in rows:
-                txt=r["text"].replace("\\t"," ").replace("\\r"," ").replace("\\n"," ")
-                f.write("%s\\t%s\\t%s\\t%s\\r\\n"%(
+                txt=r["text"].replace("\t"," ").replace("\r"," ").replace("\n"," ")
+                f.write("%s\t%s\t%s\t%s\r\n"%(
                     vegas_tc(r["start"],fps),
                     vegas_tc(r["end"],fps),
                     vegas_tc(max(.04,r["end"]-r["start"]),fps),
@@ -462,7 +468,7 @@ class App(TkinterDnD.Tk):
             self.q.put(("log","4/4 SRT와 VEGAS 파일 생성 중..."))
             self.q.put(("done",write_outputs(source,all_rows,out_dir)))
         except Exception as e:
-            self.q.put(("error",str(e)+"\\n\\n"+traceback.format_exc()))
+            self.q.put(("error",str(e)+"\n\n"+traceback.format_exc()))
 
     def _poll(self):
         try:
