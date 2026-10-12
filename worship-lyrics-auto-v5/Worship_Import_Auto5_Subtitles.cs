@@ -11,6 +11,8 @@ public class EntryPoint
     private const string PresetName = "찬양가사";
     private const string TrackName = "찬양자막_Auto5";
     private const double FadeSeconds = 0.25;
+    private const double MaxLastLyricHoldSeconds = 8.0;
+    private const double EndMarginSeconds = 0.20;
 
     private class SubtitleRow
     {
@@ -47,6 +49,22 @@ public class EntryPoint
 
             if (ok != DialogResult.Yes)
                 return;
+
+            double projectContentEnd = GetProjectContentEndSeconds(vegas);
+
+            // 마지막 가사는 마지막 음절에서 바로 사라지지 않도록
+            // 원본 영상/오디오 끝의 여운까지 유지한다.
+            // 단, 긴 무가사 아웃트로에서 지나치게 오래 남지 않도록 최대 8초로 제한한다.
+            if (rows.Count > 0)
+            {
+                SubtitleRow last = rows[rows.Count - 1];
+                double desiredEnd = Math.Min(
+                    Math.Max(last.End, projectContentEnd - EndMarginSeconds),
+                    last.End + MaxLastLyricHoldSeconds
+                );
+                if (desiredEnd > last.End)
+                    last.End = desiredEnd;
+            }
 
             VideoTrack track = FindOrCreateSubtitleTrack(vegas);
             track.Events.Clear();
@@ -202,6 +220,27 @@ public class EntryPoint
 
         fields.Add(sb.ToString());
         return fields;
+    }
+
+    private double GetProjectContentEndSeconds(Vegas vegas)
+    {
+        long maxNanos = 0;
+
+        foreach (Track tr in vegas.Project.Tracks)
+        {
+            // 기존 자동 자막 트랙은 프로젝트 길이 계산에서 제외
+            if (tr.Name == TrackName)
+                continue;
+
+            foreach (TrackEvent ev in tr.Events)
+            {
+                long endNanos = ev.Start.Nanos + ev.Length.Nanos;
+                if (endNanos > maxNanos)
+                    maxNanos = endNanos;
+            }
+        }
+
+        return maxNanos / 1000000000.0;
     }
 
     private VideoTrack FindOrCreateSubtitleTrack(Vegas vegas)
