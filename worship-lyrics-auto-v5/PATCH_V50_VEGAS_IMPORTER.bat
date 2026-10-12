@@ -15,8 +15,14 @@ set "VEGASSCRIPTS=%DOCS%\Vegas Script Menu"
 
 if not exist "%VEGASSCRIPTS%" mkdir "%VEGASSCRIPTS%"
 
-copy /Y "Worship_Import_Auto5_Subtitles.cs" "%VEGASSCRIPTS%\Worship_Import_Auto5_Subtitles.cs" >nul
-if errorlevel 1 goto :fail
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/right100479-gif/-/main/worship-lyrics-auto-v5/Worship_Import_Auto5_Subtitles.cs' -OutFile '%VEGASSCRIPTS%\Worship_Import_Auto5_Subtitles.cs'; exit 0 } catch { exit 1 }"
+if errorlevel 1 (
+  if exist "Worship_Import_Auto5_Subtitles.cs" (
+    copy /Y "Worship_Import_Auto5_Subtitles.cs" "%VEGASSCRIPTS%\Worship_Import_Auto5_Subtitles.cs" >nul
+  ) else (
+    goto :fail
+  )
+)
 
 echo.
 echo INSTALL COMPLETE
