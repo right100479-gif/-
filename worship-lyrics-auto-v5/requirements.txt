@@ -1,0 +1,6 @@
+torch
+demucs
+transformers>=4.34
+uroman
+numpy
+tkinterdnd2
