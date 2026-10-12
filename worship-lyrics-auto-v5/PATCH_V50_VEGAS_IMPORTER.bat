@@ -9,7 +9,8 @@ echo VEGAS Direct Subtitle Importer
 echo ============================================================
 echo.
 
-set "DOCS=%USERPROFILE%\Documents"
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')"`) do set "DOCS=%%D"
+if not defined DOCS set "DOCS=%USERPROFILE%\Documents"
 set "VEGASSCRIPTS=%DOCS%\Vegas Script Menu"
 
 if not exist "%VEGASSCRIPTS%" mkdir "%VEGASSCRIPTS%"
@@ -19,6 +20,7 @@ if errorlevel 1 goto :fail
 
 echo.
 echo INSTALL COMPLETE
+echo VEGAS SCRIPT FOLDER: %VEGASSCRIPTS%
 echo.
 echo VEGAS:
 echo Tools ^> Scripting ^> Rescan Script Menu Folder
