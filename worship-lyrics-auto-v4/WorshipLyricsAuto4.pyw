@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 APP_NAME="찬양 자막 자동생성"
-APP_VERSION="4.0"
+APP_VERSION="4.0.1"
 LOCALAPPDATA=Path(os.environ.get("LOCALAPPDATA", str(Path.home()/"AppData"/"Local")))
 APP_DIR=LOCALAPPDATA/"WorshipLyricsAuto4"
 DATA_DIR=APP_DIR/"data"
@@ -233,11 +233,11 @@ def srt_time(sec):
 
 def vegas_tc(sec,fps):
     total=max(0,int(round(float(sec)*fps))); fi=int(fps); h,rem=divmod(total,fi*3600); m,rem=divmod(rem,fi*60); s,ff=divmod(rem,fi)
-    return "%02d:%02d:%02d:%02d"%(h,m,s,ff)
+    return "%02d:%02d:%02d.%02d"%(h,m,s,ff)
 
 def write_outputs(source,rows,out_dir):
     out=Path(out_dir); out.mkdir(parents=True,exist_ok=True); base=Path(source).stem
-    srt=out/(base+"_SRT.srt"); rep=out/(base+"_SYNC_REPORT.csv"); t24=out/(base+"_VEGAS_24fps.txt"); t30=out/(base+"_VEGAS_30fps.txt")
+    srt=out/(base+"_SRT.srt"); rep=out/(base+"_SYNC_REPORT.csv"); t24=out/(base+"_VEGAS_TimeFrames_24fps.txt"); t30=out/(base+"_VEGAS_TimeFrames_30fps.txt")
     blocks=[]
     for i,r in enumerate(rows,1): blocks.append("%d\r\n%s --> %s\r\n%s\r\n"%(i,srt_time(r["start"]),srt_time(r["end"]),r["text"]))
     srt.write_text("\r\n".join(blocks),encoding="utf-8-sig")
@@ -355,7 +355,7 @@ class App(TkinterDnD.Tk):
                 if kind=="log": self.logmsg(p)
                 elif kind=="done":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("완료!"); self.logmsg("24fps VEGAS: "+str(p["txt24"])); self.logmsg("30fps VEGAS: "+str(p["txt30"])); self.logmsg("SRT: "+str(p["srt"])); self.logmsg("싱크 리포트: "+str(p["report"]))
-                    messagebox.showinfo(APP_NAME,"자막 싱크 생성이 끝났습니다.\n\nVEGAS에서는 Insert → Insert Subtitles from Files를 사용하세요.\n24p는 *_VEGAS_24fps.txt, 30p는 *_VEGAS_30fps.txt를 선택하고 저장해 둔 Preset을 선택합니다.")
+                    messagebox.showinfo(APP_NAME,"자막 싱크 생성이 끝났습니다.\n\n현재 VEGAS 프로젝트의 Ruler가 Time & Frames이므로\nInsert → Insert Subtitles from Files에서\n24p는 *_VEGAS_TimeFrames_24fps.txt,\n30p는 *_VEGAS_TimeFrames_30fps.txt를 선택하세요.\nPreset은 저장해 둔 찬양 자막 스타일을 선택합니다.")
                 elif kind=="error":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("오류:"); self.logmsg(p); messagebox.showerror(APP_NAME,p.split("\n\n")[0])
         except queue.Empty: pass
