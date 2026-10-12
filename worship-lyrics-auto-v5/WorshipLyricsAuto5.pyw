@@ -624,8 +624,14 @@ class App(TkinterDnD.Tk):
                 kind,p=self.q.get_nowait()
                 if kind=="log": self.logmsg(p)
                 elif kind=="done":
-                    self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("완료!"); self.logmsg("24fps VEGAS: "+str(p["txt24"])); self.logmsg("30fps VEGAS: "+str(p["txt30"])); self.logmsg("SRT: "+str(p["srt"])); self.logmsg("싱크 리포트: "+str(p["report"]))
-                    messagebox.showinfo(APP_NAME,"4.2 앵커 기반 구간 강제정렬이 끝났습니다.\n\n이번 결과는 VEGAS에서 직접 찍은 9개 구간 시작점을 기준으로 만든 것입니다.\n로그의 앞 10줄 시간을 확인한 뒤 30p 프로젝트에서는 *_VEGAS_TimeFrames_30fps.txt를 사용하세요.")
+                    self.pb.stop(); self.go_btn.configure(state="normal")
+                    self.logmsg("완료!")
+                    self.logmsg("24fps VEGAS: "+str(p["txt24"]))
+                    self.logmsg("30fps VEGAS: "+str(p["txt30"]))
+                    self.logmsg("SRT: "+str(p["srt"]))
+                    self.logmsg("싱크 리포트: "+str(p["report"]))
+                    self.logmsg("MMS 정렬 JSON: "+str(p["json"]))
+                    messagebox.showinfo(APP_NAME,"5.0 MMS 자동 싱크가 끝났습니다.\n\n곡마다 마커를 찍지 않습니다.\n먼저 앞/중간/뒤 3곳만 재생해서 싱크를 확인해 주세요.\n\n30p 프로젝트는 *_VEGAS_TimeFrames_30fps.txt를 사용하세요.")
                 elif kind=="error":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("오류:"); self.logmsg(p); messagebox.showerror(APP_NAME,p.split("\n\n")[0])
         except queue.Empty: pass
