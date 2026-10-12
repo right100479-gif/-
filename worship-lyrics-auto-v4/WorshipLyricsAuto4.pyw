@@ -6,7 +6,7 @@ from tkinter import ttk, filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 APP_NAME="찬양 자막 자동생성"
-APP_VERSION="4.0.1"
+APP_VERSION="4.1"
 LOCALAPPDATA=Path(os.environ.get("LOCALAPPDATA", str(Path.home()/"AppData"/"Local")))
 APP_DIR=LOCALAPPDATA/"WorshipLyricsAuto4"
 DATA_DIR=APP_DIR/"data"
@@ -258,7 +258,7 @@ class App(TkinterDnD.Tk):
         import tkinter as tk
         pad={"padx":10,"pady":6}
         ttk.Label(self,text="찬양 자막 자동생성",font=("Malgun Gothic",20,"bold")).pack(pady=(16,2))
-        ttk.Label(self,text="보컬 분리 → 구간 찾기 → 한국어 CTC 강제정렬 → VEGAS 기본 자막 가져오기").pack(pady=(0,12))
+        ttk.Label(self,text="보컬 분리 → 전체곡 한국어 CTC 강제정렬 → VEGAS 기본 자막 가져오기").pack(pady=(0,12))
         frm=ttk.Frame(self); frm.pack(fill="x",padx=18)
         self.audio_var=tk.StringVar(); self.lyrics_var=tk.StringVar(); self.out_var=tk.StringVar()
         ttk.Label(frm,text="1. 음악/영상").grid(row=0,column=0,sticky="nw",**pad)
@@ -302,7 +302,7 @@ class App(TkinterDnD.Tk):
         source=self.audio_var.get().strip(); lyrics=self.lyrics_var.get().strip(); out=self.out_var.get().strip() or (str(Path(source).parent) if source else "")
         if not source or not Path(source).exists(): messagebox.showwarning(APP_NAME,"음악/영상 파일을 선택해 주세요."); return
         if not lyrics or not Path(lyrics).exists(): messagebox.showwarning(APP_NAME,"가사 TXT 파일을 선택해 주세요."); return
-        self.out_var.set(out); self.go_btn.configure(state="disabled"); self.pb.start(10); self.logmsg("="*64); self.logmsg("4.0 자동 싱크를 시작합니다.")
+        self.out_var.set(out); self.go_btn.configure(state="disabled"); self.pb.start(10); self.logmsg("="*64); self.logmsg("4.1 전체곡 강제정렬을 시작합니다.")
         threading.Thread(target=self._work,args=(source,lyrics,out),daemon=True).start()
     def _work(self,source,lyrics,out_dir):
         try:
@@ -320,31 +320,60 @@ class App(TkinterDnD.Tk):
             except Exception: pass
             sep_root=work/"separated"; vocals=sep_root/"htdemucs"/source_wav.stem/"vocals.wav"
             if not vocals.exists(): vocals=separate_vocals(source_wav,sep_root,device)
-            self.q.put(("log","3/5 보컬에서 구간 위치를 찾는 중..."))
+            self.q.put(("log","3/5 분리된 보컬 전체 구간을 준비하는 중..."))
             import whisperx
-            align_device="cuda" if device=="cuda" else "cpu"; compute_type="float16" if align_device=="cuda" else "int8"
-            audio=whisperx.load_audio(str(vocals)); vocal_start,vocal_end=detect_vocal_span(audio)
-            asr=whisperx.load_model("small",align_device,compute_type=compute_type,language="ko",vad_method="silero")
-            coarse=asr.transcribe(audio,batch_size=4 if align_device=="cpu" else 8,chunk_size=15,print_progress=False,verbose=False)
-            segs=coarse.get("segments",[]) or []
-            if not segs: raise RuntimeError("보컬 구간 찾기용 음성인식 결과가 없습니다.")
-            windows=coarse_section_boundaries(sections,segs,vocal_start,vocal_end)
-            try:
-                del asr
-                import gc; gc.collect()
-                if align_device=="cuda": torch.cuda.empty_cache()
-            except Exception: pass
-            self.q.put(("log","4/5 한국어 CTC 강제정렬 모델을 불러오는 중..."))
+            align_device="cuda" if device=="cuda" else "cpu"
+            audio=whisperx.load_audio(str(vocals))
+            vocal_start,vocal_end=detect_vocal_span(audio)
+            self.q.put(("log","보컬 활동 구간: %.1f초 ~ %.1f초"%(vocal_start,vocal_end)))
+
+            self.q.put(("log","4/5 한국어 CTC 전체곡 강제정렬 모델을 불러오는 중..."))
+            self.q.put(("log","이번 버전은 Whisper가 찾은 구간을 믿지 않고, 정확한 58줄 가사를 전체 곡에 한 번에 순서대로 맞춥니다."))
             model_a,metadata=whisperx.load_align_model(language_code="ko",device=align_device)
-            all_rows=[]
-            for i,section in enumerate(sections):
-                w=windows[i]; self.q.put(("log","  [%d/%d] %s 강제정렬..."%(i+1,len(sections),section["display_name"])))
-                transcript=[{"text":" ".join(section["lines"]),"start":float(w["start"]),"end":float(w["end"])}]
-                aligned=whisperx.align(transcript,model_a,metadata,audio,align_device,interpolate_method="nearest",return_char_alignments=True,print_progress=False)
-                rows=line_times_from_section(section,aligned); all_rows.extend(rows)
-                self.q.put(("log","       직접 CTC 정렬 %d/%d줄"%(sum(1 for r in rows if r["direct"]),len(rows))))
+
+            flat_lines=[]
+            line_sections=[]
+            for section in sections:
+                for line in section["lines"]:
+                    flat_lines.append(line)
+                    line_sections.append(section["display_name"])
+
+            exact_text=" ".join(flat_lines)
+            transcript=[{
+                "text":exact_text,
+                "start":float(vocal_start),
+                "end":float(vocal_end)
+            }]
+
+            aligned=whisperx.align(
+                transcript,
+                model_a,
+                metadata,
+                audio,
+                align_device,
+                interpolate_method="nearest",
+                return_char_alignments=True,
+                print_progress=False
+            )
+
+            pseudo={"display_name":"GLOBAL","lines":flat_lines}
+            all_rows=line_times_from_section(pseudo,aligned)
+
+            if len(all_rows)!=len(line_sections):
+                raise RuntimeError("전체곡 강제정렬 결과의 가사 줄 수가 원본과 다릅니다.")
+
+            for i,r in enumerate(all_rows):
+                r["section"]=line_sections[i]
+
+            direct=sum(1 for r in all_rows if r["direct"])
+            self.q.put(("log","전체곡 직접 CTC 정렬: %d/%d줄"%(direct,len(all_rows))))
+            self.q.put(("log","앞 10줄 타이밍 확인:"))
+            for i,r in enumerate(all_rows[:10],1):
+                self.q.put(("log","  %02d. %7.2f ~ %7.2f  %s"%(i,r["start"],r["end"],r["text"])))
+
             for i in range(len(all_rows)-1):
-                if all_rows[i]["end"]>=all_rows[i+1]["start"]: all_rows[i]["end"]=max(all_rows[i]["start"]+.40,all_rows[i+1]["start"]-.04)
+                if all_rows[i]["end"]>=all_rows[i+1]["start"]:
+                    all_rows[i]["end"]=max(all_rows[i]["start"]+.40,all_rows[i+1]["start"]-.04)
             self.q.put(("log","5/5 SRT와 VEGAS 파일 생성 중..."))
             self.q.put(("done",write_outputs(source,all_rows,out_dir)))
         except Exception as e: self.q.put(("error",str(e)+"\n\n"+traceback.format_exc()))
@@ -355,7 +384,7 @@ class App(TkinterDnD.Tk):
                 if kind=="log": self.logmsg(p)
                 elif kind=="done":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("완료!"); self.logmsg("24fps VEGAS: "+str(p["txt24"])); self.logmsg("30fps VEGAS: "+str(p["txt30"])); self.logmsg("SRT: "+str(p["srt"])); self.logmsg("싱크 리포트: "+str(p["report"]))
-                    messagebox.showinfo(APP_NAME,"자막 싱크 생성이 끝났습니다.\n\n현재 VEGAS 프로젝트의 Ruler가 Time & Frames이므로\nInsert → Insert Subtitles from Files에서\n24p는 *_VEGAS_TimeFrames_24fps.txt,\n30p는 *_VEGAS_TimeFrames_30fps.txt를 선택하세요.\nPreset은 저장해 둔 찬양 자막 스타일을 선택합니다.")
+                    messagebox.showinfo(APP_NAME,"4.1 전체곡 강제정렬이 끝났습니다.\n\nVEGAS에 넣기 전에 프로그램 로그의 앞 10줄 시간이 실제 노래와 맞는지 먼저 확인해 주세요.\n\n30p 프로젝트는 *_VEGAS_TimeFrames_30fps.txt를 사용합니다.")
                 elif kind=="error":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("오류:"); self.logmsg(p); messagebox.showerror(APP_NAME,p.split("\n\n")[0])
         except queue.Empty: pass
