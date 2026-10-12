@@ -212,11 +212,10 @@ public class EntryPoint
                 return vt;
         }
 
-        VideoTrack track = new VideoTrack();
-        track.Name = TrackName;
-
-        // 자막은 영상 위에 보여야 하므로 맨 위 트랙에 삽입합니다.
-        vegas.Project.Tracks.Insert(0, track);
+        // VEGAS 21+에서는 Project에 연결되지 않은 빈 VideoTrack() 객체를
+        // Tracks.Insert()로 넣으면 "Invalid Track object"가 발생할 수 있습니다.
+        // Project-aware 생성자를 사용해 처음부터 유효한 트랙을 0번 위치에 만듭니다.
+        VideoTrack track = new VideoTrack(vegas.Project, 0, TrackName);
         return track;
     }
 
