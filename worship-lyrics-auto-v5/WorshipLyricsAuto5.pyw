@@ -474,7 +474,39 @@ def vegas_tc(sec,fps):
     total=max(0,int(round(float(sec)*fps))); fi=int(fps); h,rem=divmod(total,fi*3600); m,rem=divmod(rem,fi*60); s,ff=divmod(rem,fi)
     return "%02d:%02d:%02d.%02d"%(h,m,s,ff)
 
+def get_media_duration_seconds(source):
+    try:
+        flags=getattr(subprocess,"CREATE_NO_WINDOW",0) if os.name=="nt" else 0
+        cp=subprocess.run(
+            ["ffprobe","-v","error","-show_entries","format=duration",
+             "-of","default=noprint_wrappers=1:nokey=1",str(source)],
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+            encoding="utf-8",errors="replace",creationflags=flags
+        )
+        if cp.returncode==0:
+            return max(0.0,float((cp.stdout or "").strip()))
+    except Exception:
+        pass
+    return 0.0
+
+def extend_final_lyric_to_tail(source,rows):
+    if not rows:
+        return None
+    last=rows[-1]
+    original=float(last["end"])
+    duration=get_media_duration_seconds(source)
+    if duration<=original:
+        return (original,original,duration)
+
+    # 마지막 음절에서 즉시 사라지지 않고 실제 곡의 여운까지 남긴다.
+    # 아주 긴 무가사 아웃트로는 최대 8초까지만 유지한다.
+    target=min(max(original,duration-0.20),original+8.0)
+    if target>original:
+        last["end"]=target
+    return (original,float(last["end"]),duration)
+
 def write_outputs(source,rows,out_dir):
+    tail_info=extend_final_lyric_to_tail(source,rows)
     out=Path(out_dir); out.mkdir(parents=True,exist_ok=True); base=Path(source).stem
     srt=out/(base+"_SRT.srt")
     rep=out/(base+"_SYNC_REPORT.csv")
@@ -508,7 +540,7 @@ def write_outputs(source,rows,out_dir):
         "engine":"MMS-300M + built-in CTC Viterbi",
         "rows":rows
     },ensure_ascii=False,indent=2),encoding="utf-8-sig")
-    return {"srt":srt,"report":rep,"json":jsn,"txt24":t24,"txt30":t30}
+    return {"srt":srt,"report":rep,"json":jsn,"txt24":t24,"txt30":t30,"tail_info":tail_info}
 
 class App(TkinterDnD.Tk):
     def __init__(self):
@@ -631,6 +663,9 @@ class App(TkinterDnD.Tk):
                     self.logmsg("SRT: "+str(p["srt"]))
                     self.logmsg("싱크 리포트: "+str(p["report"]))
                     self.logmsg("MMS 정렬 JSON: "+str(p["json"]))
+                    if p.get("tail_info"):
+                        a,b,d=p["tail_info"]
+                        self.logmsg("마지막 가사 여운: %.2f초 → %.2f초 (곡 끝 %.2f초)"%(a,b,d))
                     messagebox.showinfo(APP_NAME,"5.0 MMS 자동 싱크가 끝났습니다.\n\n곡마다 마커를 찍지 않습니다.\n먼저 앞/중간/뒤 3곳만 재생해서 싱크를 확인해 주세요.\n\n30p 프로젝트는 *_VEGAS_TimeFrames_30fps.txt를 사용하세요.")
                 elif kind=="error":
                     self.pb.stop(); self.go_btn.configure(state="normal"); self.logmsg("오류:"); self.logmsg(p); messagebox.showerror(APP_NAME,p.split("\n\n")[0])
