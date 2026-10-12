@@ -87,7 +87,8 @@ public class EntryPoint
                 created++;
             }
 
-            track.Selected = true;
+            if (track.IsValid())
+                track.Selected = true;
 
             MessageBox.Show(
                 created.ToString() + "개 자막을 가져왔습니다.\n\n" +
@@ -212,10 +213,11 @@ public class EntryPoint
                 return vt;
         }
 
-        // VEGAS 21+에서는 Project에 연결되지 않은 빈 VideoTrack() 객체를
-        // Tracks.Insert()로 넣으면 "Invalid Track object"가 발생할 수 있습니다.
-        // Project-aware 생성자를 사용해 처음부터 유효한 트랙을 0번 위치에 만듭니다.
-        VideoTrack track = new VideoTrack(vegas.Project, 0, TrackName);
+        // VEGAS 공식 API의 AddVideoTrack()을 사용해 프로젝트에 실제 등록된
+        // 유효한 트랙을 먼저 만든다. 생성자만 호출하면 Track.IsValid()==false인
+        // 상태가 될 수 있어 Selected/Events 접근 시 "Invalid Track object"가 난다.
+        VideoTrack track = vegas.Project.AddVideoTrack();
+        track.Name = TrackName;
         return track;
     }
 
