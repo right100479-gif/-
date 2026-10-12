@@ -81,7 +81,7 @@ echo [5/5] VEGAS fade helper and desktop shortcut...
 set "DOCS=%USERPROFILE%\Documents"
 set "VEGASSCRIPTS=%DOCS%\Vegas Script Menu"
 if not exist "%VEGASSCRIPTS%" mkdir "%VEGASSCRIPTS%"
-copy /Y "Worship_Fade_Imported_Subtitles.cs" "%VEGASSCRIPTS%\Worship_Fade_Imported_Subtitles.cs" >nul
+copy /Y "Worship_Fade_Imported_Subtitles.cs" "%VEGASSCRIPTS%\Worship_Fade_Imported_Subtitles.cs" >nul\r\ncopy /Y "Worship_Import_Auto5_Subtitles.cs" "%VEGASSCRIPTS%\Worship_Import_Auto5_Subtitles.cs" >nul
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ws=New-Object -ComObject WScript.Shell; $s=$ws.CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Worship Lyrics Auto 5.0.lnk'); $s.TargetPath='%VENV%\Scripts\pythonw.exe'; $s.Arguments='\"%APPDIR%\WorshipLyricsAuto5.pyw\"'; $s.WorkingDirectory='%APPDIR%'; $s.Save()"
