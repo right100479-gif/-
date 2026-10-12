@@ -82,13 +82,130 @@ def separate_vocals(wav_path,sep_root,device):
     if hits: return max(hits,key=lambda p:p.stat().st_mtime)
     raise RuntimeError("Demucs 보컬 파일을 찾지 못했습니다.")
 
-def align_lines_mms(vocals_path,sections,device,log_cb=None):
+def _load_audio_16k_mono(path):
+    import numpy as np
+    flags=getattr(subprocess,"CREATE_NO_WINDOW",0) if os.name=="nt" else 0
+    cmd=[
+        "ffmpeg","-nostdin","-hide_banner","-loglevel","error",
+        "-i",str(path),"-f","s16le","-ac","1","-acodec","pcm_s16le","-ar","16000","-"
+    ]
+    cp=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=flags)
+    if cp.returncode!=0:
+        raise RuntimeError("16kHz 보컬 변환 실패:\n"+cp.stderr.decode("utf-8","replace")[-3000:])
+    return np.frombuffer(cp.stdout,dtype=np.int16).astype(np.float32)/32768.0
+
+def _mms_emissions(audio,model,device,batch_size=2):
     import torch
-    from ctc_forced_aligner import (
-        load_audio, load_alignment_model, generate_emissions,
-        get_alignments, get_spans, postprocess_results,
-        text_normalize, get_uroman_tokens
-    )
+    import torch.nn.functional as F
+    import numpy as np
+
+    sr=16000
+    ratio=int(model.config.inputs_to_logits_ratio)
+    window=30*sr
+    context=2*sr
+    waveform=torch.from_numpy(audio)
+
+    if waveform.numel()<window:
+        inputs=waveform.unsqueeze(0)
+        context_frames=0
+        window_frames=None
+        extension=0
+    else:
+        extension=math.ceil(waveform.numel()/window)*window-waveform.numel()
+        padded=F.pad(waveform,(context,context+extension))
+        inputs=padded.unfold(0,window+2*context,window)
+        context_frames=context//ratio
+        window_frames=window//ratio
+
+    pieces=[]
+    with torch.inference_mode():
+        for i in range(0,inputs.size(0),max(1,batch_size)):
+            batch=inputs[i:i+max(1,batch_size)].to(device=device,dtype=model.dtype)
+            logits=model(batch).logits
+            if window_frames is not None:
+                logits=logits[:,context_frames:context_frames+window_frames]
+            pieces.append(logits.float().cpu())
+
+    emissions=torch.cat(pieces,dim=0)
+    if emissions.dim()==3:
+        emissions=emissions.flatten(0,1)
+    if extension>0:
+        trim=extension//ratio
+        if trim>0:
+            emissions=emissions[:-trim]
+
+    emissions=torch.log_softmax(emissions,dim=-1).numpy().astype(np.float32,copy=False)
+    stride=ratio/sr
+    return emissions,stride
+
+def _ctc_viterbi(log_probs,targets,blank_id):
+    import numpy as np
+
+    targets=np.asarray(targets,dtype=np.int32)
+    T,C=log_probs.shape
+    L=len(targets)
+    if L==0:
+        raise RuntimeError("CTC 대상 토큰이 비어 있습니다.")
+
+    repeats=int(np.sum(targets[1:]==targets[:-1])) if L>1 else 0
+    if T<L+repeats:
+        raise RuntimeError("오디오 프레임이 가사 토큰 수보다 짧아 강제정렬할 수 없습니다.")
+
+    ext=np.full(2*L+1,blank_id,dtype=np.int32)
+    ext[1::2]=targets
+    S=len(ext)
+    neg=np.float32(-1e30)
+
+    prev=np.full(S,neg,dtype=np.float32)
+    prev[0]=log_probs[0,blank_id]
+    if S>1:
+        prev[1]=log_probs[0,targets[0]]
+
+    back=np.zeros((T,S),dtype=np.uint8)
+    skip_allowed=np.zeros(S,dtype=bool)
+    if S>2:
+        idx=np.arange(2,S)
+        skip_allowed[2:]=(ext[2:]!=blank_id)&(ext[2:]!=ext[:-2])
+
+    for t in range(1,T):
+        best=prev.copy()
+        choice=np.zeros(S,dtype=np.uint8)
+
+        step=np.full(S,neg,dtype=np.float32)
+        step[1:]=prev[:-1]
+        mask=step>best
+        best[mask]=step[mask]
+        choice[mask]=1
+
+        skip=np.full(S,neg,dtype=np.float32)
+        skip[2:]=prev[:-2]
+        skip[~skip_allowed]=neg
+        mask=skip>best
+        best[mask]=skip[mask]
+        choice[mask]=2
+
+        prev=best+log_probs[t,ext]
+        back[t]=choice
+
+    if S==1:
+        state=0
+    else:
+        state=S-1 if prev[S-1]>=prev[S-2] else S-2
+
+    states=np.empty(T,dtype=np.int32)
+    for t in range(T-1,-1,-1):
+        states[t]=state
+        if t>0:
+            state-=int(back[t,state])
+            if state<0:
+                state=0
+    return states
+
+def align_lines_mms(vocals_path,sections,device,log_cb=None):
+    import numpy as np
+    import torch
+    from transformers import AutoModelForCTC, AutoTokenizer
+    from uroman import Uroman
 
     lyric_rows=[]
     for section in sections:
@@ -97,73 +214,104 @@ def align_lines_mms(vocals_path,sections,device,log_cb=None):
     if not lyric_rows:
         raise RuntimeError("정렬할 가사가 없습니다.")
 
+    model_name="MahmoudAshraf/mms-300m-1130-forced-aligner"
     if log_cb:
-        log_cb("MMS-300M 정렬 모델을 준비하는 중... 첫 실행은 모델 다운로드로 오래 걸릴 수 있습니다.")
+        log_cb("MMS-300M 다국어 정렬 모델을 준비하는 중... 첫 실행은 모델 다운로드로 오래 걸릴 수 있습니다.")
 
     dtype=torch.float16 if device=="cuda" else torch.float32
-    model,tokenizer=load_alignment_model(
-        device,
-        "MahmoudAshraf/mms-300m-1130-forced-aligner",
-        None,
-        dtype
-    )
+    try:
+        model=AutoModelForCTC.from_pretrained(model_name,dtype=dtype).to(device).eval()
+    except TypeError:
+        model=AutoModelForCTC.from_pretrained(model_name,torch_dtype=dtype).to(device).eval()
+    tokenizer=AutoTokenizer.from_pretrained(model_name,word_delimiter_token=None)
 
     if log_cb:
-        log_cb("분리된 보컬에서 30초 창 + 2초 문맥으로 음소 확률맵을 만드는 중...")
-    waveform=load_audio(str(vocals_path),model.dtype,model.device)
-    emissions,stride=generate_emissions(
-        model,waveform,
-        window_length=30,
-        context_length=2,
-        batch_size=2 if device=="cpu" else 4
+        log_cb("분리된 보컬을 16kHz로 준비하는 중...")
+    audio=_load_audio_16k_mono(vocals_path)
+
+    if log_cb:
+        log_cb("30초 창 + 2초 문맥으로 곡 전체 음소 확률맵을 만드는 중...")
+    emissions,stride=_mms_emissions(audio,model,device,2 if device=="cpu" else 4)
+
+    dictionary={str(k).lower():int(v) for k,v in tokenizer.get_vocab().items()}
+    blank_id=dictionary.get("<blank>",tokenizer.pad_token_id)
+    star_id=emissions.shape[1]
+    emissions=np.concatenate(
+        [emissions,np.zeros((emissions.shape[0],1),dtype=np.float32)],
+        axis=1
     )
 
-    normalized=[text_normalize(r["text"],"kor") for r in lyric_rows]
-    romanized=get_uroman_tokens(normalized,"kor")
+    uroman=Uroman()
+    targets=[]
+    line_ranges=[]
+    valid_rows=[]
 
-    tokens_starred=[]
-    text_starred=[]
-    valid=[]
-    for row,roman in zip(lyric_rows,romanized):
-        roman=re.sub(r"\s+"," ",roman).strip()
-        if not roman:
+    for row in lyric_rows:
+        text=row["text"].strip().lower()
+        try:
+            roman=uroman.romanize_string(text,lcode="kor")
+        except Exception:
+            roman=uroman.romanize_string(text)
+        roman=re.sub(r"[^a-z']+","",roman.lower())
+
+        ids=[dictionary[ch] for ch in roman if ch in dictionary]
+        if not ids:
             continue
-        tokens_starred.extend(["<star>",roman])
-        text_starred.extend(["<star>",row["text"]])
-        valid.append(row)
-    tokens_starred.append("<star>")
-    text_starred.append("<star>")
 
-    if not valid:
-        raise RuntimeError("가사를 로마자화한 뒤 정렬할 텍스트가 남지 않았습니다.")
+        targets.append(star_id)
+        line_start=len(targets)
+        targets.extend(ids)
+        line_end=len(targets)-1
+        line_ranges.append((line_start,line_end))
+        valid_rows.append(row)
+
+    targets.append(star_id)
+
+    if not valid_rows:
+        raise RuntimeError("가사를 로마자화한 뒤 정렬할 토큰이 남지 않았습니다.")
 
     if log_cb:
-        log_cb("정답 가사를 받아쓰지 않고, 곡 전체에 직접 CTC 강제정렬하는 중...")
-    segments,scores,blank_token=get_alignments(emissions,tokens_starred,tokenizer)
-    spans=get_spans(tokens_starred,segments,blank_token)
-    results=postprocess_results(text_starred,spans,stride,scores,0.0)
-
-    if len(results)!=len(valid):
-        raise RuntimeError(
-            "MMS 정렬 줄 수가 원본과 다릅니다. 원본 %d줄 / 결과 %d줄"
-            %(len(valid),len(results))
-        )
+        log_cb("정답 가사를 받아쓰지 않고 CTC Viterbi로 직접 강제정렬하는 중...")
+    states=_ctc_viterbi(emissions,targets,blank_id)
 
     rows=[]
-    for src,res in zip(valid,results):
-        st=max(0.0,float(res["start"]))
-        en=max(st+.12,float(res["end"]))
+    for row,(a,b) in zip(valid_rows,line_ranges):
+        frame_ids=[]
+        frame_scores=[]
+        for target_pos in range(a,b+1):
+            state_id=2*target_pos+1
+            frames=np.flatnonzero(states==state_id)
+            if frames.size:
+                frame_ids.append(frames)
+                tok=targets[target_pos]
+                frame_scores.append(emissions[frames,tok])
+        if not frame_ids:
+            raise RuntimeError("일부 가사 줄의 MMS 정렬 프레임을 찾지 못했습니다: "+row["text"])
+
+        frames=np.concatenate(frame_ids)
+        st=max(0.0,float(frames.min())*stride-.03)
+        en=max(st+.12,float(frames.max()+1)*stride+.05)
+        score=float(np.concatenate(frame_scores).mean()) if frame_scores else 0.0
+
         rows.append({
-            "section":src["section"],
-            "text":src["text"],
+            "section":row["section"],
+            "text":row["text"],
             "start":st,
             "end":en,
-            "mms_score":float(res.get("score",0.0))
+            "mms_score":score
         })
 
     for i in range(len(rows)-1):
         if rows[i]["end"]>=rows[i+1]["start"]:
             rows[i]["end"]=max(rows[i]["start"]+.10,rows[i+1]["start"]-.03)
+
+    try:
+        del model
+        if device=="cuda":
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
     return rows
 
 def detect_vocal_span(audio,sr=16000):
@@ -357,7 +505,7 @@ def write_outputs(source,rows,out_dir):
             w.writerow([i,r["section"],"%.3f"%r["start"],"%.3f"%r["end"],"%.4f"%r["mms_score"],r["text"]])
 
     jsn.write_text(json.dumps({
-        "engine":"MahmoudAshraf/mms-300m-1130-forced-aligner",
+        "engine":"MMS-300M + built-in CTC Viterbi",
         "rows":rows
     },ensure_ascii=False,indent=2),encoding="utf-8-sig")
     return {"srt":srt,"report":rep,"json":jsn,"txt24":t24,"txt30":t30}
